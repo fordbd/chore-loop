@@ -42,6 +42,7 @@ jobs:
         run: |
           docker run --rm -v "$PWD:/app" -w /app python:3.13-slim python -m unittest discover -s tests -v
           docker run --rm -v "$PWD:/app" -w /app node:24-alpine node tests/test_storage.cjs
+          docker run --rm -v "$PWD:/app" -w /app node:24-alpine node tests/test_assignment.cjs
 
       - name: Set up ARM emulation
         uses: docker/setup-qemu-action@v4

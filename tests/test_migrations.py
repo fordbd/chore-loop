@@ -20,7 +20,7 @@ class MigrationTests(unittest.TestCase):
         self.temp=tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.path=Path(self.temp.name)/'chores.sqlite3'
-        self.steps={**MIGRATIONS,2:add_updated_at}
+        self.steps={**MIGRATIONS,3:add_updated_at}
 
     def seed_legacy(self):
         # Exact schema and marker written by the previously deployed app.
@@ -39,30 +39,30 @@ class MigrationTests(unittest.TestCase):
         return list(self.path.parent.glob('migration-backups/*.sqlite3'))
 
     def test_fresh_database_initializes_and_restart_is_noop(self):
-        self.assertEqual(migrate(self.path),1)
-        self.assertEqual(migrate(self.path),1)
-        self.assertEqual(self.rows('SELECT version FROM schema_version'),[(1,)])
+        self.assertEqual(migrate(self.path),2)
+        self.assertEqual(migrate(self.path),2)
+        self.assertEqual(self.rows('SELECT version FROM schema_version'),[(1,),(2,)])
         self.assertEqual(self.rows('SELECT * FROM planner'),[])
         self.assertEqual(self.backups(),[])
 
     def test_legacy_current_version_preserves_chart_without_backup(self):
         self.seed_legacy()
         before=self.rows('SELECT * FROM planner')
-        self.assertEqual(migrate(self.path),1)
+        self.assertEqual(migrate(self.path,{1:MIGRATIONS[1]}),1)
         self.assertEqual(self.rows('SELECT * FROM planner'),before)
         self.assertEqual(self.backups(),[])
 
     def test_upgrade_preserves_data_and_backs_up_original_schema(self):
         self.seed_legacy()
-        self.assertEqual(migrate(self.path,self.steps),2)
+        self.assertEqual(migrate(self.path,self.steps),3)
         self.assertEqual(self.rows('SELECT revision,state,updated_at FROM planner'),[(7,'{"checks":{"finished":true}}','migrated')])
-        self.assertEqual(self.rows('SELECT version FROM schema_version ORDER BY version'),[(1,),(2,)])
+        self.assertEqual(self.rows('SELECT version FROM schema_version ORDER BY version'),[(1,),(2,),(3,)])
         backup=self.backups();self.assertEqual(len(backup),1)
         with closing(sqlite3.connect(backup[0])) as db:
             self.assertEqual(db.execute('SELECT * FROM planner').fetchall(),[(1,7,'{"checks":{"finished":true}}')])
             self.assertEqual(db.execute('PRAGMA quick_check').fetchone()[0],'ok')
             self.assertEqual(db.execute('SELECT version FROM schema_version').fetchall(),[(1,)])
-        self.assertEqual(migrate(self.path,self.steps),2)
+        self.assertEqual(migrate(self.path,self.steps),3)
         self.assertEqual(len(self.backups()),1)
 
     def test_failed_multi_step_upgrade_rolls_back_all_changes(self):
@@ -72,13 +72,13 @@ class MigrationTests(unittest.TestCase):
             db.execute("UPDATE planner SET state='changed'")
             raise RuntimeError('Simulated migration failure')
         with self.assertRaisesRegex(RuntimeError,'Simulated'):
-            migrate(self.path,{**self.steps,3:failing})
+            migrate(self.path,{**self.steps,4:failing})
         self.assertEqual(self.rows('SELECT version FROM schema_version'),[(1,)])
         self.assertEqual(self.rows('SELECT * FROM planner'),[(1,7,'{"checks":{"finished":true}}')])
         self.assertNotIn('updated_at',[r[1] for r in self.rows('PRAGMA table_info(planner)')])
         self.assertEqual(self.rows("SELECT name FROM sqlite_master WHERE name='temporary_upgrade'"),[])
         self.assertEqual(len(self.backups()),1)
-        self.assertEqual(migrate(self.path,self.steps),2)
+        self.assertEqual(migrate(self.path,self.steps),3)
 
     def test_backup_failure_aborts_before_schema_changes(self):
         self.seed_legacy()
@@ -100,7 +100,7 @@ class MigrationTests(unittest.TestCase):
         self.seed_legacy()
         with ThreadPoolExecutor(max_workers=2) as pool:
             versions=list(pool.map(lambda _:migrate(self.path,self.steps),range(2)))
-        self.assertEqual(versions,[2,2])
+        self.assertEqual(versions,[3,3])
         self.assertEqual(len(self.backups()),1)
 
     def test_unversioned_existing_database_is_not_modified(self):
@@ -110,15 +110,30 @@ class MigrationTests(unittest.TestCase):
             migrate(self.path)
         self.assertEqual(self.rows("SELECT name FROM sqlite_master WHERE name='schema_version'"),[])
 
+    def test_v2_adds_missing_minutes_and_preserves_existing_data(self):
+        import json
+        self.seed_legacy()
+        state={'version':1,'chores':[{'id':'a'},{'id':'b','minutes':25}],'checks':{'done':True},'kids':[{'name':'Test'}]}
+        with closing(sqlite3.connect(self.path)) as db, db:
+            db.execute('UPDATE planner SET state=?',(json.dumps(state),))
+        self.assertEqual(migrate(self.path),2)
+        revision,raw=self.rows('SELECT revision,state FROM planner')[0]
+        saved=json.loads(raw)
+        self.assertEqual(revision,8)
+        self.assertEqual([c['minutes'] for c in saved['chores']],[10,25])
+        self.assertEqual(saved['checks'],state['checks'])
+        self.assertEqual(saved['kids'],state['kids'])
+        self.assertEqual(len(self.backups()),1)
+
     def test_backup_includes_committed_wal_data(self):
         self.seed_legacy()
         with closing(sqlite3.connect(self.path)) as writer:
             writer.execute('PRAGMA wal_autocheckpoint=0')
-            writer.execute("UPDATE planner SET revision=8,state='wal-committed'")
+            writer.execute("UPDATE planner SET revision=8,state='{}'")
             writer.commit()
             migrate(self.path,self.steps)
         with closing(sqlite3.connect(self.backups()[0])) as db:
-            self.assertEqual(db.execute('SELECT revision,state FROM planner').fetchone(),(8,'wal-committed'))
+            self.assertEqual(db.execute('SELECT revision,state FROM planner').fetchone(),(8,'{}'))
 
 
 if __name__=='__main__':

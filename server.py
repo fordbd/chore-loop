@@ -92,6 +92,8 @@ def valid_state(s):
             return False
         if type(c.get('min')) is not int or not 1 <= c['min'] <= 99 or c.get('when') not in SCHEDULES:
             return False
+        if type(c.get('minutes', 10)) is not int or not 1 <= c.get('minutes', 10) <= 480:
+            return False
         a = c.get('assignment', 'rotate')
         if not isinstance(a, str) or (a not in ('rotate','everyone') and a not in {'child:'+i for i in ids}):
             return False

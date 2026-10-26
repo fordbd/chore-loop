@@ -126,7 +126,7 @@ Pending schema changes and their version records run together inside one transac
 
 Automatic backups are created only for actual upgrades of an existing database. They are retained until you remove them and should be included in your regular backups. Continue taking routine backups before upgrades. Stop the old container before starting the new version.
 
-For future development, add the next numbered migration function to `MIGRATIONS` in `migrations.py`, together with migration tests. Use `execute`/`executemany` inside migration functions, never `executescript`, `commit`, or `rollback`. Data-format changes inside the saved chart JSON must also receive an explicit migration when needed. A Git push does not invent migrations: each database-changing release must include them. The current release remains schema v1 because it needs no schema change itself.
+For future development, add the next numbered migration function to `MIGRATIONS` in `migrations.py`, together with migration tests. Use `execute`/`executemany` inside migration functions, never `executescript`, `commit`, or `rollback`. Data-format changes inside the saved chart JSON must also receive an explicit migration when needed. A Git push does not invent migrations: each database-changing release must include them. Schema v2 adds a default estimate of 10 minutes per occurrence to existing chores that have no estimate, preserving existing estimates and completion checkboxes. You can edit Minutes in chore settings. Assignment balances estimated minutes separately on each scheduled day, using rotation to break ties. Weekly totals are ignored. Flexible any-day chores rotate among eligible children because they have no scheduled day. Age rules and specific assignments remain in effect. Exact equality may be impossible when chores are indivisible or age restrictions apply.
 
 If an upgrade fails, inspect container logs. Correct the cause and restart, or stop the container and restore the pre-upgrade database backup using the recovery instructions below. App-image rollback and database rollback are separate operations.
 
@@ -165,6 +165,7 @@ Backend tests (no dependencies beyond Python):
 ```sh
 python3 -m unittest discover -s tests -v
 node tests/test_storage.cjs
+node tests/test_assignment.cjs
 ```
 
 The Docker image pins Waitress 3.0.2 with verified PyPI artifact hashes. Docker was unavailable in the authoring environment, so image build and Compose startup must be verified on your Docker host.
@@ -207,3 +208,5 @@ Compose is optional: the standalone `docker run` instructions above work with ex
 If publishing fails with a package permission error, ensure Actions is enabled and the package grants this repository write access (particularly if the package was previously created by a manual push). The workflow requests `contents: read` and `packages: write`; no other secrets are required. GitHub-hosted Actions usage is subject to the account's included minutes and billing settings.
 
 References: [GitHub Docker publishing](https://docs.github.com/en/actions/tutorials/publish-packages/publish-docker-images), [GitHub Container Registry](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry).
+
+Flexible monthly chores are scheduled in the week beginning on the first Monday of their month; flexible quarterly chores use the first Monday of Jan, Apr, Jul, or Oct. Chores with an explicit weekday retain their first-occurrence weekday schedule.

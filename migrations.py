@@ -6,6 +6,7 @@ those can escape the runner's encompassing transaction.
 from contextlib import closing
 from datetime import datetime, timezone
 import logging
+import json
 from pathlib import Path
 import sqlite3
 import uuid
@@ -21,7 +22,26 @@ def schema_v1(db):
     db.execute('CREATE TABLE planner (id INTEGER PRIMARY KEY CHECK(id=1), revision INTEGER NOT NULL, state TEXT NOT NULL)')
 
 
-MIGRATIONS = {1: schema_v1}
+def schema_v2(db):
+    """Introduce per-occurrence chore durations without changing existing estimates."""
+    for row_id, raw in db.execute('SELECT id,state FROM planner').fetchall():
+        state = json.loads(raw)
+        if not isinstance(state, dict) or not isinstance(state.get('chores', []), list):
+            raise MigrationError('Saved chart has invalid chore data.')
+        changed = False
+        for chore in state.get('chores', []):
+            if not isinstance(chore, dict):
+                raise MigrationError('Saved chart has invalid chore data.')
+            if 'minutes' not in chore:
+                chore['minutes'] = 10
+                changed = True
+            if type(chore['minutes']) is not int or not 1 <= chore['minutes'] <= 480:
+                raise MigrationError('Saved chart has an invalid chore duration.')
+        if changed:
+            db.execute('UPDATE planner SET state=?, revision=revision+1 WHERE id=?', (json.dumps(state,separators=(',', ':')),row_id))
+
+
+MIGRATIONS = {1: schema_v1, 2: schema_v2}
 CURRENT_SCHEMA_VERSION = max(MIGRATIONS)
 
 

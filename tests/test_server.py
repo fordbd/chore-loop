@@ -106,6 +106,14 @@ class BackendTests(unittest.TestCase):
         self.assertEqual(self.request(auth=False)['body']['state'],chart())
         self.assertTrue(self.request('PUT',auth=False,headers=False,body={'revision':1,'state':chart()})['status'].startswith('403'))
 
+    def test_chore_minutes_validation_and_persistence(self):
+        s=chart();s['chores'][0]['minutes']=35
+        self.assertTrue(self.save(state=s)['status'].startswith('200'))
+        self.assertEqual(self.request()['body']['state']['chores'][0]['minutes'],35)
+        for value in [0,-1,481,1.5,True,'10',None]:
+            s['chores'][0]['minutes']=value
+            self.assertFalse(valid_state(s))
+
     def test_credentials_required(self):
         with self.assertRaises(ValueError):create_app(self.path,'family','')
 
