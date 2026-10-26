@@ -63,8 +63,8 @@ jobs:
         run: |
           docker run -d --name chore-loop-smoke --read-only \
             --tmpfs /tmp --tmpfs /data:uid=10001,gid=10001 \
-            -e APP_USER=ci -e APP_PASSWORD=ci-smoke-test-only \
-            -p 127.0.0.1:18080:8080 chore-loop-smoke:test
+            -p 127.0.0.1:18080:8080 chore-loop-smoke:test \
+            sh -c 'printf "APP_USER=ci\nAPP_PASSWORD=ci-smoke-test-only\n" > /data/.env; exec python server.py'
           ready=false
           for attempt in {1..30}; do
             if curl -fsS http://127.0.0.1:18080/healthz > /dev/null; then

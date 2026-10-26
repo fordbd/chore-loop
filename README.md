@@ -7,7 +7,7 @@ Runs the existing planner and a Python/Waitress API in one container, with a SQL
 The image already contains both the web interface and SQLite backend. You can deploy it with Docker alone.
 
 1. For a private package, log in to GitHub Container Registry as described below.
-2. Copy `.env.example` to `.env`, set `APP_PASSWORD`, and restrict access to that file. Docker's `--env-file` passes its settings to the container; the default internal application port is 8080.
+2. Put a `.env` file in the storage mounted at `/data`. The app reads `/data/.env` automatically; no `--env-file` option is needed. Set `APP_USER` and a strong `APP_PASSWORD`. For an existing bind-mounted data folder, create the file directly in that folder and make it readable by container UID 10001. For a Docker named volume, use the one-time copy command below.
 3. Set `IMAGE_REF` to the **exact image reference** printed by a successful GitHub workflow (`latest`, a version tag, or `sha-` plus the full commit SHA).
 
 ```sh
@@ -15,11 +15,18 @@ The image already contains both the web interface and SQLite backend. You can de
 IMAGE_REF='ghcr.io/fordbd/chore-loop:latest'
 docker pull "$IMAGE_REF"
 docker volume create chore-loop-data
+
+# One-time setup: create a local .env from .env.example and set APP_PASSWORD.
+# Copy it into the volume as /data/.env with owner-only permissions.
+docker run --rm -i \
+  --mount type=volume,source=chore-loop-data,target=/data \
+  --entrypoint python "$IMAGE_REF" \
+  -c 'from pathlib import Path; import sys; p=Path("/data/.env"); p.write_bytes(sys.stdin.buffer.read()); p.chmod(0o600)' < .env
+
 docker run -d \
   --name chore-loop \
   --restart unless-stopped \
   --publish 8080:8080 \
-  --env-file .env \
   --mount type=volume,source=chore-loop-data,target=/data \
   --read-only \
   --tmpfs /tmp \
@@ -28,9 +35,11 @@ docker run -d \
   "$IMAGE_REF"
 ```
 
+The container reads `/data/.env` at startup. Supported keys are `APP_USER`, `APP_PASSWORD`, `TZ`, `DB_PATH`, and `PORT`. Explicit container environment variables take precedence, so existing `-e` / Compose deployments remain compatible. Quotes and comments are supported; values are literal, with no shell execution or variable expansion. Restart the container after changing the file. Missing credentials cause startup to stop with a clear error rather than inventing a password.
+
 Open `http://YOUR-SERVER-IP:8080`. The existing LAN/HTTPS guidance below also applies. To use a different host port, change only the left side of `--publish`, for example `8090:8080`. `APP_PORT` and `BIND_ADDRESS` in `.env.example` are Compose-only settings; standalone Docker uses `--publish`. To bind to loopback for a local reverse proxy, use `--publish 127.0.0.1:8080:8080`.
 
-Check startup with `docker logs --tail=100 chore-loop`. Import your existing chart via **Restore backup** once it is running. The named volume stores the database and survives removal of the application container.
+Check startup with `docker logs --tail=100 chore-loop`. Import your existing chart via **Restore backup** once it is running. The named volume stores both the database and `.env` and survives removal of the application container.
 
 Take an online-safe backup with:
 
@@ -102,7 +111,7 @@ mkdir -p backups
 docker compose exec -T planner python backup.py > backups/chores.sqlite3
 ```
 
-Use a different destination filename each time if you want backup history. Schedule this command with your host's backup scheduler and include the resulting files in your normal backups. The helper uses SQLite's backup API so it includes committed data even while the database is in WAL mode; do not copy just the live `.sqlite3` file while the app is running.
+Use a different destination filename each time if you want backup history. Schedule this command with your host's backup scheduler and include the resulting files in your normal backups. The SQLite backup contains chart data only; back up `/data/.env` separately as a private configuration file. The helper uses SQLite's backup API so it includes committed data even while the database is in WAL mode; do not copy just the live `.sqlite3` file while the app is running.
 
 For a portable restore, prefer **Restore backup** with a JSON export. For disaster recovery from a database backup:
 

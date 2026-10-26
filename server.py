@@ -6,10 +6,53 @@ import os
 from pathlib import Path
 import re
 import sqlite3
+import shlex
+import time
 from contextlib import closing
 
 MAX_BODY = 1_000_000
 SCHEDULES = {'daily','mwf','mon','tue','wed','thu','fri','sat','sun','weekly','monthly','quarterly'}
+
+
+
+def load_runtime_env(path='/data/.env', environ=None):
+    """Read literal dotenv values; explicit process environment takes precedence."""
+    config = {}
+    allowed = {'APP_USER', 'APP_PASSWORD', 'DB_PATH', 'PORT', 'TZ'}
+    source = Path(path)
+    if source.exists():
+        for number, raw in enumerate(source.read_text(encoding='utf-8-sig').splitlines(), 1):
+            line = raw.strip()
+            if not line or line.startswith('#'):
+                continue
+            if line.startswith('export '):
+                line = line[7:].lstrip()
+            key, separator, value = line.partition('=')
+            key = key.strip()
+            if not separator or not re.fullmatch(r'[A-Za-z_][A-Za-z0-9_]*', key):
+                raise ValueError(f'Invalid configuration at {source}, line {number}.')
+            value = value.strip()
+            if value.startswith(('"', "'")):
+                try:
+                    parts = shlex.split(value, comments=True, posix=True)
+                    if len(parts) != 1:
+                        raise ValueError()
+                    value = parts[0]
+                except ValueError:
+                    raise ValueError(f'Invalid quoted value at {source}, line {number}.') from None
+            else:
+                value = re.split(r'\s+#', value, maxsplit=1)[0].rstrip()
+            if key in allowed:
+                config[key] = value
+    config.update(dict(os.environ if environ is None else environ))
+    return config
+
+
+def configured_app(config):
+    password = config.get('APP_PASSWORD', '')
+    if not password:
+        raise ValueError('Set APP_PASSWORD in /data/.env (or provide it as an environment variable).')
+    return create_app(config.get('DB_PATH', '/data/chores.sqlite3'), config.get('APP_USER', 'family'), password)
 
 
 def valid_state(s):
@@ -150,5 +193,10 @@ def create_app(db_path, username, password):
 
 if __name__ == '__main__':
     from waitress import serve
-    application = create_app(os.environ.get('DB_PATH','/data/chores.sqlite3'),os.environ.get('APP_USER','family'),os.environ.get('APP_PASSWORD',''))
-    serve(application,host='0.0.0.0',port=int(os.environ.get('PORT','8080')),threads=4,max_request_body_size=MAX_BODY)
+    config = load_runtime_env()
+    if config.get('TZ'):
+        os.environ['TZ'] = config['TZ']
+        if hasattr(time, 'tzset'):
+            time.tzset()
+    application = configured_app(config)
+    serve(application,host='0.0.0.0',port=int(config.get('PORT','8080')),threads=4,max_request_body_size=MAX_BODY)
