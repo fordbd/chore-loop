@@ -1,0 +1,9 @@
+.env
+__pycache__/
+*.pyc
+*.sqlite3*
+backups/
+.data/
+
+# Legacy Sites hosting metadata is not used for local deployment.
+.openai/
