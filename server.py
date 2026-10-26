@@ -9,6 +9,7 @@ import sqlite3
 import shlex
 import time
 from contextlib import closing
+from migrations import migrate
 
 MAX_BODY = 1_000_000
 SCHEDULES = {'daily','mwf','mon','tue','wed','thu','fri','sat','sun','weekly','monthly','quarterly'}
@@ -104,11 +105,9 @@ class Store:
     def __init__(self, path):
         self.path = str(path)
         Path(path).parent.mkdir(parents=True, exist_ok=True)
-        with closing(self.connect()) as db, db:
+        migrate(self.path)
+        with closing(self.connect()) as db:
             db.execute('PRAGMA journal_mode=WAL')
-            db.execute('CREATE TABLE IF NOT EXISTS schema_version (version INTEGER PRIMARY KEY)')
-            db.execute('INSERT OR IGNORE INTO schema_version VALUES (1)')
-            db.execute('CREATE TABLE IF NOT EXISTS planner (id INTEGER PRIMARY KEY CHECK(id=1), revision INTEGER NOT NULL, state TEXT NOT NULL)')
 
     def connect(self):
         db = sqlite3.connect(self.path, timeout=10)

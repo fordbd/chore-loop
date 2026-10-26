@@ -114,7 +114,21 @@ git pull --ff-only
 docker compose up -d --build
 ```
 
-The named volume survives container recreation and `docker compose down`. **Do not use `docker compose down -v` unless you intend to delete the database.** Use the same project directory or Compose project name so subsequent deployments use the same named volume. Schema version 1 is initialized automatically; future schema changes should include explicit migrations and a pre-upgrade backup.
+The named volume survives container recreation and `docker compose down`. **Do not use `docker compose down -v` unless you intend to delete the database.** Use the same project directory or Compose project name so subsequent deployments use the same named volume. Schema migrations run automatically before the web server starts; see Database migrations below.
+
+## Database migrations
+
+At startup, the app reads the database schema version and applies any pending migrations included in the image. Existing schema-v1 databases are recognized without resetting the chart. A new database is initialized at the current schema version.
+
+Before upgrading an existing database, the app creates an integrity-checked SQLite backup in `/data/migration-backups/` (or `migration-backups/` beside a custom `DB_PATH`). The backup uses SQLite's online backup API, including committed WAL data. Backup failure stops startup before migrations run.
+
+Pending schema changes and their version records run together inside one transaction, with a SQLite writer lock preventing simultaneous upgrades or saves. If a migration fails, all pending changes roll back, the pre-upgrade backup remains, and the app does not start. After success, restart does not reapply migrations or create another backup for the same version. Startup refuses databases newer than the app supports; selecting an older image does not downgrade the database.
+
+Automatic backups are created only for actual upgrades of an existing database. They are retained until you remove them and should be included in your regular backups. Continue taking routine backups before upgrades. Stop the old container before starting the new version.
+
+For future development, add the next numbered migration function to `MIGRATIONS` in `migrations.py`, together with migration tests. Use `execute`/`executemany` inside migration functions, never `executescript`, `commit`, or `rollback`. Data-format changes inside the saved chart JSON must also receive an explicit migration when needed. A Git push does not invent migrations: each database-changing release must include them. The current release remains schema v1 because it needs no schema change itself.
+
+If an upgrade fails, inspect container logs. Correct the cause and restart, or stop the container and restore the pre-upgrade database backup using the recovery instructions below. App-image rollback and database rollback are separate operations.
 
 ## Backups
 

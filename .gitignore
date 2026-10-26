@@ -7,3 +7,5 @@ backups/
 
 # Legacy Sites hosting metadata is not used for local deployment.
 .openai/
+
+migration-backups/
