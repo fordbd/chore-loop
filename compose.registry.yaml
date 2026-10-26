@@ -1,7 +1,7 @@
 # Standalone deployment file: use with -f compose.registry.yaml.
 services:
   planner:
-    image: ${APP_IMAGE:?Set APP_IMAGE in .env to your GitLab registry image and tag}
+    image: ${APP_IMAGE:?Set APP_IMAGE in .env to your container image and tag}
     restart: unless-stopped
     ports:
       - "${BIND_ADDRESS:-0.0.0.0}:${APP_PORT:-8080}:8080"

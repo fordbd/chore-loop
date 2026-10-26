@@ -1,0 +1,111 @@
+name: Build and publish
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Image tag (for example latest or v1.0.0)'
+        required: true
+        default: latest
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publish-container
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v6
+
+      - name: Validate tag and determine image name
+        id: image
+        env:
+          IMAGE_TAG: ${{ inputs.tag }}
+        run: |
+          if [[ ! "$IMAGE_TAG" =~ ^[a-zA-Z0-9_][a-zA-Z0-9_.-]{0,127}$ ]]; then
+            echo 'Enter a valid Docker tag, such as latest or v1.0.0.' >&2
+            exit 1
+          fi
+          echo "name=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+
+      - name: Run backend and browser-storage tests
+        run: |
+          docker run --rm -v "$PWD:/app" -w /app python:3.13-slim python -m unittest discover -s tests -v
+          docker run --rm -v "$PWD:/app" -w /app node:24-alpine node tests/test_storage.cjs
+
+      - name: Set up ARM emulation
+        uses: docker/setup-qemu-action@v4
+        with:
+          platforms: arm64
+
+      - name: Set up Docker builder
+        uses: docker/setup-buildx-action@v4
+
+      - name: Build image for startup check
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          load: true
+          platforms: linux/amd64
+          tags: chore-loop-smoke:test
+
+      - name: Verify container startup
+        run: |
+          docker run -d --name chore-loop-smoke --read-only \
+            --tmpfs /tmp --tmpfs /data:uid=10001,gid=10001 \
+            -e APP_USER=ci -e APP_PASSWORD=ci-smoke-test-only \
+            -p 127.0.0.1:18080:8080 chore-loop-smoke:test
+          ready=false
+          for attempt in {1..30}; do
+            if curl -fsS http://127.0.0.1:18080/healthz > /dev/null; then
+              ready=true
+              break
+            fi
+            sleep 1
+          done
+          if [ "$ready" != true ]; then
+            docker logs chore-loop-smoke
+            exit 1
+          fi
+          curl -fsS --user ci:ci-smoke-test-only http://127.0.0.1:18080/api/state
+          docker rm -f chore-loop-smoke
+
+      - name: Sign in to GitHub Container Registry
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publish Intel and ARM images
+        id: build
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          push: true
+          platforms: linux/amd64,linux/arm64
+          tags: |
+            ${{ steps.image.outputs.name }}:${{ inputs.tag }}
+            ${{ steps.image.outputs.name }}:sha-${{ github.sha }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.description=Family chore planner with shared SQLite storage
+
+      - name: Show published image
+        env:
+          IMAGE_NAME: ${{ steps.image.outputs.name }}
+          IMAGE_TAG: ${{ inputs.tag }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          printf '## Image published\n\n`%s:%s`\n\nDigest: `%s`\n' "$IMAGE_NAME" "$IMAGE_TAG" "$DIGEST" >> "$GITHUB_STEP_SUMMARY"
