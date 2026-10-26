@@ -18,7 +18,7 @@ SCHEDULES = {'daily','mwf','mon','tue','wed','thu','fri','sat','sun','weekly','m
 def load_runtime_env(path='/data/.env', environ=None):
     """Read literal dotenv values; explicit process environment takes precedence."""
     config = {}
-    allowed = {'APP_USER', 'APP_PASSWORD', 'DB_PATH', 'PORT', 'TZ'}
+    allowed = {'AUTH_ENABLED', 'APP_USER', 'APP_PASSWORD', 'DB_PATH', 'PORT', 'TZ'}
     source = Path(path)
     if source.exists():
         for number, raw in enumerate(source.read_text(encoding='utf-8-sig').splitlines(), 1):
@@ -49,10 +49,14 @@ def load_runtime_env(path='/data/.env', environ=None):
 
 
 def configured_app(config):
+    value = config.get('AUTH_ENABLED', 'true').strip().lower()
+    if value not in {'true', '1', 'yes', 'on', 'false', '0', 'no', 'off'}:
+        raise ValueError('AUTH_ENABLED must be true or false.')
+    auth_enabled = value in {'true', '1', 'yes', 'on'}
     password = config.get('APP_PASSWORD', '')
-    if not password:
+    if auth_enabled and not password:
         raise ValueError('Set APP_PASSWORD in /data/.env (or provide it as an environment variable).')
-    return create_app(config.get('DB_PATH', '/data/chores.sqlite3'), config.get('APP_USER', 'family'), password)
+    return create_app(config.get('DB_PATH', '/data/chores.sqlite3'), config.get('APP_USER', 'family'), password, auth_enabled=auth_enabled)
 
 
 def valid_state(s):
@@ -132,8 +136,8 @@ class Store:
             source.backup(target)
 
 
-def create_app(db_path, username, password):
-    if not username or not password or ':' in username:
+def create_app(db_path, username, password, auth_enabled=True):
+    if auth_enabled and (not username or not password or ':' in username):
         raise ValueError('Set APP_USER and APP_PASSWORD; username must not contain a colon.')
     store = Store(db_path)
     index = Path(__file__).with_name('dist').joinpath('index.html')
@@ -158,7 +162,7 @@ def create_app(db_path, username, password):
             authenticated = scheme.lower() == 'basic' and hmac.compare_digest(credentials.encode(),(username+':'+password).encode())
         except (ValueError,UnicodeError):
             authenticated = False
-        if not authenticated:
+        if auth_enabled and not authenticated:
             return respond('401 Unauthorized',{'error':'Sign in required'},extra=[('WWW-Authenticate','Basic realm="Family planner", charset="UTF-8"')])
         try:
             if path in ('/','/index.html') and method == 'GET':

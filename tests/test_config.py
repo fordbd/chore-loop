@@ -50,6 +50,22 @@ UNKNOWN=ignored
         with self.assertRaises(ValueError):
             configured_app(self.load('APP_PASSWORD='))
 
+    def test_auth_disabled_in_file_does_not_require_password(self):
+        database=Path(self.temp.name)/'no-login.sqlite3'
+        config=self.load(f'AUTH_ENABLED=false\nDB_PATH={database}\n')
+        self.assertTrue(callable(configured_app(config)))
+        self.assertEqual(Store(database).read()['revision'],0)
+
+    def test_auth_environment_override_and_safe_default(self):
+        config=self.load('AUTH_ENABLED=false',{'AUTH_ENABLED':'true'})
+        with self.assertRaisesRegex(ValueError,'APP_PASSWORD'):
+            configured_app(config)
+        with self.assertRaisesRegex(ValueError,'APP_PASSWORD'):
+            configured_app({})
+        for value in ['tru','disabled','', 'something']:
+            with self.assertRaisesRegex(ValueError,'AUTH_ENABLED'):
+                configured_app({'AUTH_ENABLED':value})
+
     def test_configured_application_uses_file_database(self):
         database=Path(self.temp.name)/'custom.sqlite3'
         config=self.load(f'APP_USER=family\nAPP_PASSWORD=test-only\nDB_PATH={database}\n')

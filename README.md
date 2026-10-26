@@ -35,7 +35,7 @@ docker run -d \
   "$IMAGE_REF"
 ```
 
-The container reads `/data/.env` at startup. Supported keys are `APP_USER`, `APP_PASSWORD`, `TZ`, `DB_PATH`, and `PORT`. Explicit container environment variables take precedence, so existing `-e` / Compose deployments remain compatible. Quotes and comments are supported; values are literal, with no shell execution or variable expansion. Restart the container after changing the file. Missing credentials cause startup to stop with a clear error rather than inventing a password.
+The container reads `/data/.env` at startup. Supported keys are `AUTH_ENABLED`, `APP_USER`, `APP_PASSWORD`, `TZ`, `DB_PATH`, and `PORT`. Explicit container environment variables take precedence, so existing `-e` / Compose deployments remain compatible. Quotes and comments are supported; values are literal, with no shell execution or variable expansion. Restart the container after changing the file. Missing credentials cause startup to stop with a clear error rather than inventing a password.
 
 Open `http://YOUR-SERVER-IP:8080`. The existing LAN/HTTPS guidance below also applies. To use a different host port, change only the left side of `--publish`, for example `8090:8080`. `APP_PORT` and `BIND_ADDRESS` in `.env.example` are Compose-only settings; standalone Docker uses `--publish`. To bind to loopback for a local reverse proxy, use `--publish 127.0.0.1:8080:8080`.
 
@@ -77,6 +77,20 @@ docker compose ps
 Open `http://YOUR-SERVER-IP:8080` from your computer or phone on the same network. Sign in with `APP_USER` and `APP_PASSWORD`. For example, if your Docker host is `192.168.1.20`, use `http://192.168.1.20:8080`. Reserve a stable address for that host on your router. Allow port 8080 through the host firewall only as appropriate for your home network.
 
 The default port binds to all host interfaces for LAN access. Set `BIND_ADDRESS=127.0.0.1` when using a reverse proxy on the same host. This deployment has a single shared household login; it does not implement separate parent/child permissions. HTTP Basic authentication should be used over HTTPS or a trusted VPN when accessing it outside your trusted home LAN. Do not expose the HTTP port directly to the internet.
+
+## Optional login
+
+Login is enabled by default (`AUTH_ENABLED=true`). To disable it, add this to `/data/.env` and restart the container:
+
+```dotenv
+AUTH_ENABLED=false
+```
+
+Or explicitly pass `-e AUTH_ENABLED=false` to `docker run`. When disabled, neither `APP_USER` nor `APP_PASSWORD` is required, and anyone who can reach the app can view and edit the shared chart. The SQLite API uses the same setting as the web page.
+
+To re-enable login, set `AUTH_ENABLED=true` and provide `APP_PASSWORD`, then restart. Invalid values stop startup instead of disabling authentication accidentally. Explicit container environment variables override `/data/.env`.
+
+The supplied Compose files pass `AUTH_ENABLED` from the host's Compose `.env` (default `true`), so set it there when deploying with Compose. An empty password is allowed by Compose itself, but the application still requires a password whenever authentication is enabled.
 
 ## Move your existing chart
 

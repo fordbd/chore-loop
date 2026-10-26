@@ -98,6 +98,14 @@ class BackendTests(unittest.TestCase):
             s['chores'][0]['when']=when;self.assertTrue(valid_state(s))
         s['kids'][0]['birthDate']='2099-01-01';self.assertFalse(valid_state(s))
 
+    def test_optional_auth_allows_page_and_api_without_credentials(self):
+        self.app=create_app(self.path,'','',auth_enabled=False)
+        self.assertTrue(self.request(path='/',auth=False)['status'].startswith('200'))
+        response=self.request('PUT',auth=False,body={'revision':0,'state':chart()})
+        self.assertEqual(response['body'],{'revision':1})
+        self.assertEqual(self.request(auth=False)['body']['state'],chart())
+        self.assertTrue(self.request('PUT',auth=False,headers=False,body={'revision':1,'state':chart()})['status'].startswith('403'))
+
     def test_credentials_required(self):
         with self.assertRaises(ValueError):create_app(self.path,'family','')
 
